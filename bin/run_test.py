@@ -13,23 +13,25 @@ import json
 from deepdiff import DeepDiff
 
 
-def run_rtl433(input_fn, rtl_433_cmd="rtl_433",
-               samplerate=250000, protocol=None):
+def run_rtl433(input_fn, samplerate=None, protocol=None, rtl_433_cmd="rtl_433"):
     """Run rtl_433 and return output."""
-    args = ['-F', 'json', '-s', str(samplerate), '-r', input_fn]
+    args = ['-c', '0', '-M', 'newmodel']
     if protocol:
-        args = ['-R', str(protocol)] + args
+        args.extend(['-R', str(protocol)])
+    if samplerate:
+        args.extend(['-s', str(samplerate)])
+    args.extend(['-F', 'json', '-r', input_fn])
     cmd = [rtl_433_cmd] + args
     # print(" ".join(cmd))
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out, err = p.communicate()
-    return (out, err)
+    return (out, err, p.returncode)
 
 
 def find_json():
     """Find all reference json files recursive."""
     matches = []
-    for root, dirnames, filenames in os.walk('tests'):
+    for root, _dirnames, filenames in os.walk('tests'):
         for filename in fnmatch.filter(filenames, '*.json'):
             matches.append(os.path.join(root, filename))
     return matches
@@ -94,14 +96,17 @@ def main():
                     if not json_line.strip():
                         continue
                     expected_data.append(json.loads(json_line))
-            except ValueError as err:
+            except ValueError as _err:
                 print("ERROR: invalid json: '%s'" % output_fn)
                 continue
             expected_data = remove_fields(expected_data, ignore_fields)
 
         # Run rtl_433
-        rtl433out, err = run_rtl433(input_fn, rtl_433_cmd,
-                                    samplerate, protocol)
+        rtl433out, _err, exitcode = run_rtl433(input_fn, samplerate,
+                                               protocol, rtl_433_cmd)
+
+        if exitcode:
+            print("ERROR: Exited with %d '%s'" % (exitcode, input_fn))
 
         # get JSON results
         rtl433out = rtl433out.decode('utf8').strip()
@@ -135,6 +140,8 @@ def main():
                 print(" %s" % error)
                 for detail in details:
                     print("  * %s" % detail)
+            print(" Expected: " + str(expected_data))
+            print("  But got: " + str(results))
         else:
             nb_ok += 1
 
